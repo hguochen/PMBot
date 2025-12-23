@@ -85,7 +85,7 @@ UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
 TRAILING_STOP_PERCENT = 0.10  # Trail the peak by 10%
-TRAILING_ACTIVE_GATE = 0.55
+TRAILING_ACTIVE_GATE = 0.53
 ASK_VS_BID_SPREAD = 0.04
 
 # Arbitrage total cost must NOT be higher than this value
