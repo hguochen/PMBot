@@ -215,4 +215,5 @@ events/
 .env.*
 *.pem
 *.key
->>>>>>> cef9456 (add gitignore)
+*.txt
+polymarket_config.md
