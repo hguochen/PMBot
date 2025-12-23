@@ -81,7 +81,8 @@ BUFFER_COST_THRESHOLD = 0.01
 STOP_LOSS_THRESHOLD_PRICE = 0.25
 UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
-TRAILING_STOP_PERCENT = 0.15  # Trail the peak by 15%
+# the lower the percent, the more aggressive the stop_loss_price moves up
+TRAILING_STOP_PERCENT = 0.10  # Trail the peak by 10%
 ASK_VS_BID_SPREAD = 0.04
 
 # Arbitrage total cost must NOT be higher than this value
