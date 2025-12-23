@@ -73,7 +73,7 @@ def append_log(lines):
 # 1. HARDCODED TARGET SETTINGS
 # =========================================================
 TARGET_USDC_SIZE = 5.00
-TARGET_COST = 0.42
+TARGET_COST = 0.43
 
 TRADE_WINDOW_MINUTE = 14
 ABORT_TRADE_WINDOW_MINUTE = 6
