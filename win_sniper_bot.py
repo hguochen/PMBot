@@ -198,8 +198,8 @@ def run_bot(event_url):
             up_mean_price = bid_up
             down_mean_price = bid_down
             if (len(last_ten_up_bids) >=3 and len(last_ten_down_bids) >=3):
-                up_mean_price = statistics.mean(last_ten_up_bids)
-                down_mean_price = statistics.mean(last_ten_down_bids)
+                up_mean_price = round(statistics.mean(last_ten_up_bids), 2)
+                down_mean_price = round(statistics.mean(last_ten_down_bids), 2)
 
             if not isinstance(bid_up, (int, float)) or not isinstance(bid_down, (int, float)):
                 print(f"Prices are not numbers: bid_up: {bid_up}, bid_down:{bid_down}")
@@ -208,7 +208,7 @@ def run_bot(event_url):
             print(f"📈 Currently running market: {market_name} - {event_url}")
             print(f"📖 Time Left: {seconds_left//60:.0f}m {seconds_left%60:.0f}s | In Trade?: {IN_POSITION} | ⬆️ UP Bid: {bid_up or 'N/A'} | ⬇️ DOWN Bid: {bid_down or 'N/A'}")
 
-            if SHOULD_BID and seconds_left > ABORT_TRADE_WINDOW_MINUTE * 60:
+            if SHOULD_BID and seconds_left > ABORT_TRADE_WINDOW_MINUTE * 60 and seconds_left < TRADE_WINDOW_MINUTE * 60:
                 print(f"🟢 Bid window: OPEN.")
             else:
                 print(f"❌ Bid window: Closed.")
@@ -275,15 +275,17 @@ def run_bot(event_url):
             # 3. ENTER BID WINDOW
             if IN_POSITION:
                 print(f"You have an ACTIVE position. bid: {BID_DIRECTION} | shares_amount: {shares} | total_invested_size: {ACTIVE_BID_PRICE * shares} | trailing_stop_loss_price: {effective_stop_loss}")
-            if SHOULD_BID and not IN_ARBITRAGE and seconds_left < TRADE_WINDOW_MINUTE * 60 and seconds_left >= ABORT_TRADE_WINDOW_MINUTE * 60:
-                if not IN_POSITION:
-                    print(f"Monitoring ACTIVE. Looking for BIDS above {TARGET_COST - BUFFER_COST_THRESHOLD} ...")
+            if not IN_POSITION and SHOULD_BID and not IN_ARBITRAGE and seconds_left < TRADE_WINDOW_MINUTE * 60 and seconds_left >= ABORT_TRADE_WINDOW_MINUTE * 60:
+                print(f"👀 Monitoring ACTIVE. Looking for BIDS above {TARGET_COST - BUFFER_COST_THRESHOLD} | UP Mean: {up_mean_price:.3f} | DOWN Mean: {down_mean_price:.3f}")
                 dist_up = abs(bid_up - TARGET_COST)
                 dist_down = abs(bid_down - TARGET_COST)
 
                 # 3.1 Bid UP section
                 if not IN_POSITION and bid_up >= TARGET_COST - BUFFER_COST_THRESHOLD and dist_up < dist_down:
-                    print(f"🔥 Target hit! Bid UP is {bid_up}. Attempting to BUY...")
+                    if bid_up < up_mean_price:
+                        print(f"❌ Target hit for UP, but price is below Mean. Bid UP price: {bid_up} | UP Mean Price: {up_mean_price:.2f} Waiting for upward momentum...")
+                        continue
+                    print(f"🔥 Target hit! Bid UP price: {bid_up} | UP Mean Price: {up_mean_price:.2f}. Attempting to BUY...")
                     try:
                         resp, shares = execute_with_slippage_guard(up_id, bid_up, "BUY", MAX_SLIPPAGE)
                         if resp and resp.get("success"):
@@ -308,7 +310,10 @@ def run_bot(event_url):
                         continue
                 # 3.2 Bid DOWN section
                 elif not IN_POSITION and bid_down >= TARGET_COST - BUFFER_COST_THRESHOLD and dist_down < dist_up:
-                    print(f"🔥 Target hit! Bid DOWN is {bid_down}. Attempting to BUY...")
+                    if bid_down < down_mean_price:
+                        print(f"❌ Target hit for DOWN, but price is below Mean. Bid DOWN price: {bid_down} | DOWN Mean Price: {down_mean_price:.2f} Waiting for upward momentum...")
+                        continue
+                    print(f"🔥 Target hit! Bid UP price: {bid_down} | UP Mean Price: {down_mean_price:.2f}. Attempting to BUY...")
                     try:
                         resp, shares = execute_with_slippage_guard(down_id, bid_down, "BUY", MAX_SLIPPAGE)
                         if resp and resp.get("success"):
@@ -359,11 +364,15 @@ def run_bot(event_url):
                 should_sell = False
                 # rule 1: BID is UP and mean up price is below effective stop loss price
                 if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "UP" and up_mean_price <= effective_stop_loss):
+                    print(f"- Should sell because UP mean price is below effective_stop_loss. UP mean price: {up_mean_price}")
                     should_sell = True
                 # rule 2: BID is DOWN and mean down price is below effective stop loss price
                 if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "DOWN" and down_mean_price <= effective_stop_loss):
+                    print(f"- Should sell because DOWN mean price is below effective_stop_loss. DOWN mean price: {down_mean_price}")
                     should_sell = True
+                # rule 3: if current_price is below emergency stop loss price, sell immediately
                 if (current_price and isinstance(current_price, (int, float)) and current_price <= STOP_LOSS_THRESHOLD_PRICE):
+                    print(f"- Should sell because current_price: {current_price} is below emergency stop loss price: {STOP_LOSS_THRESHOLD_PRICE}")
                     should_sell = True
                 
                 if should_sell:
