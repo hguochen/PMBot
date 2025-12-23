@@ -73,14 +73,14 @@ def append_log(lines):
 # 1. HARDCODED TARGET SETTINGS
 # =========================================================
 TARGET_USDC_SIZE = 5.00
-TARGET_COST = 0.43
+TARGET_COST = 0.42
 
 TRADE_WINDOW_MINUTE = 14
 ABORT_TRADE_WINDOW_MINUTE = 6
 HARD_EXIT_SECONDS = 150
 
 BUFFER_COST_THRESHOLD = 0.01
-STOP_LOSS_THRESHOLD_PRICE = 0.30
+STOP_LOSS_THRESHOLD_PRICE = 0.31
 UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
