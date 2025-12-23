@@ -73,7 +73,7 @@ def append_log(lines):
 # 1. HARDCODED TARGET SETTINGS
 # =========================================================
 TARGET_USDC_SIZE = 5.00
-TARGET_COST = 0.45
+TARGET_COST = 0.43
 
 TRADE_WINDOW_MINUTE = 14
 ABORT_TRADE_WINDOW_MINUTE = 6
@@ -85,6 +85,7 @@ UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
 TRAILING_STOP_PERCENT = 0.10  # Trail the peak by 10%
+TRAILING_ACTIVE_GATE = 0.55
 ASK_VS_BID_SPREAD = 0.04
 
 # Arbitrage total cost must NOT be higher than this value
@@ -173,6 +174,7 @@ def run_bot(event_url):
         ACTIVE_BID_PRICE = None
         IN_ARBITRAGE = False
         effective_stop_loss = STOP_LOSS_THRESHOLD_PRICE
+        TRAILING_ACTIVE = False
         # track the last 5 prices for the ACTIVE position to filter noise
         last_ten_up_bids = deque(maxlen = 10)
         last_ten_down_bids = deque(maxlen = 10)
@@ -343,6 +345,9 @@ def run_bot(event_url):
                 current_price = bid_up if BID_DIRECTION == "UP" else bid_down
                 stop_loss_id = up_id if BID_DIRECTION == "UP" else down_id
 
+                if not TRAILING_ACTIVE and current_price >= TRAILING_ACTIVE_GATE:
+                    print(f"🚀 THRESHOLD REACHED: Trailing stop-loss is now ACTIVE.")
+                    TRAILING_ACTIVE = True
                 # update the highest_price_seen to calculate dynamic stop loss price
                 if current_price > highest_price_seen:
                     highest_price_seen = current_price
@@ -355,9 +360,9 @@ def run_bot(event_url):
                 stop_loss_cap = round(ACTIVE_BID_PRICE * UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES, 2)
 
                 # if trailing floor is below ACTIVE_BID_PRICE, update the effective_stop_loss price, otherwise leave it
-                if (round(trailing_floor, 2) > effective_stop_loss and effective_stop_loss < stop_loss_cap):
+                if TRAILING_ACTIVE and (round(trailing_floor, 2) > effective_stop_loss and effective_stop_loss < stop_loss_cap):
                     effective_stop_loss = round(min(trailing_floor, stop_loss_cap), 2)
-                    print(f"👉 📈 Effective stop loss updated/capped. New stop loss: {round(effective_stop_loss, 2)}")
+                    print(f"👉 📈 Effective stop loss trailing improved. New stop loss: {round(effective_stop_loss, 2)}")
                 if effective_stop_loss > ACTIVE_BID_PRICE:
                     print(f"🔒🟢 No loss trade achieved! Good Job! Stop Loss Price: {effective_stop_loss} | Active Bid Price: {ACTIVE_BID_PRICE}")
                 # conditions to STOP SELL
