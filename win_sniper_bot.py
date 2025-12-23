@@ -2,7 +2,9 @@ import os
 import time
 import datetime
 import math
+import statistics
 
+from collections import deque
 from decimal import Decimal, ROUND_DOWN
 from dotenv import load_dotenv
 from types import SimpleNamespace
@@ -78,7 +80,7 @@ ABORT_TRADE_WINDOW_MINUTE = 6
 HARD_EXIT_SECONDS = 150
 
 BUFFER_COST_THRESHOLD = 0.01
-STOP_LOSS_THRESHOLD_PRICE = 0.25
+STOP_LOSS_THRESHOLD_PRICE = 0.30
 UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
@@ -171,7 +173,10 @@ def run_bot(event_url):
         ACTIVE_BID_PRICE = None
         IN_ARBITRAGE = False
         effective_stop_loss = STOP_LOSS_THRESHOLD_PRICE
-
+        # track the last 5 prices for the ACTIVE position to filter noise
+        last_ten_up_bids = deque(maxlen = 10)
+        last_ten_down_bids = deque(maxlen = 10)
+        
         while True:
             # 1. TIME CALCULATION
             time_left = market_end_dt - datetime.now(timezone.utc)
@@ -187,6 +192,15 @@ def run_bot(event_url):
             if bid_up is None or bid_down is None:
                 print(f"⚠️ Skipping tick: API returned None for prices. UP: {bid_up} | DOWN: {bid_down}")
                 continue
+            # calculate the rolling mean price of up and down bid prices
+            last_ten_up_bids.append(bid_up)
+            last_ten_down_bids.append(bid_down)
+            up_mean_price = bid_up
+            down_mean_price = bid_down
+            if (len(last_ten_up_bids) >=3 and len(last_ten_down_bids) >=3):
+                up_mean_price = statistics.mean(last_ten_up_bids)
+                down_mean_price = statistics.mean(last_ten_down_bids)
+
             if not isinstance(bid_up, (int, float)) or not isinstance(bid_down, (int, float)):
                 print(f"Prices are not numbers: bid_up: {bid_up}, bid_down:{bid_down}")
                 continue
@@ -341,7 +355,18 @@ def run_bot(event_url):
                     print(f"👉 📈 Effective stop loss updated/capped. New stop loss: {round(effective_stop_loss, 2)}")
                 if effective_stop_loss > ACTIVE_BID_PRICE:
                     print(f"🔒🟢 No loss trade achieved! Good Job! Stop Loss Price: {effective_stop_loss} | Active Bid Price: {ACTIVE_BID_PRICE}")
-                if current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss:
+                # conditions to STOP SELL
+                should_sell = False
+                # rule 1: BID is UP and mean up price is below effective stop loss price
+                if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "UP" and up_mean_price <= effective_stop_loss):
+                    should_sell = True
+                # rule 2: BID is DOWN and mean down price is below effective stop loss price
+                if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "DOWN" and down_mean_price <= effective_stop_loss):
+                    should_sell = True
+                if (current_price and isinstance(current_price, (int, float)) and current_price <= STOP_LOSS_THRESHOLD_PRICE):
+                    should_sell = True
+                
+                if should_sell:
                     print(f"\n🚨 STOP LOSS TRIGGERED. Effective stop loss price is ${effective_stop_loss}. Price dropped to ${current_price}. Attempting to SELL ALL.")
                     try:
                         sell_response = execute_stop_loss(stop_loss_id, shares, "SELL", MAX_SLIPPAGE)
