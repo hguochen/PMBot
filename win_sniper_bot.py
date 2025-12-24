@@ -74,8 +74,9 @@ def append_log(lines):
 # =========================================================
 TARGET_USDC_SIZE = 5.00
 TARGET_COST = 0.43
+MAX_TARGET_COST = 0.70
 
-TRADE_WINDOW_MINUTE = 15
+TRADE_WINDOW_MINUTE = 10
 ABORT_TRADE_WINDOW_MINUTE = 6
 HARD_EXIT_SECONDS = 150
 
@@ -290,8 +291,12 @@ def run_bot(event_url):
                 
                 # check eligibility for both sides independently
                 target_side = None
-                up_eligible = bid_up >= TARGET_COST and bid_up >= up_mean_price
-                down_eligible = bid_down >= TARGET_COST and bid_down >= down_mean_price
+                # buy UP/DOWN is eligible iff:
+                # - Price is more than TARGET_COST
+                # - Price is less than MAX_TARGET_COST
+                # - Price is on a trending momentum by being higher than the last 10 prices
+                up_eligible = bid_up >= TARGET_COST and bid_up <= MAX_TARGET_COST and bid_up >= up_mean_price and bid_up >= bid_down
+                down_eligible = bid_down >= TARGET_COST and bid_up <= MAX_TARGET_COST and bid_down >= down_mean_price and bid_down > bid_up
 
                 # decision matrix to buy UP or DOWN
                 if up_eligible and down_eligible:
@@ -396,10 +401,10 @@ def run_bot(event_url):
                 # rule 3: if current_price is below emergency stop loss price, sell immediately
                 should_sell = False
                 if (BID_DIRECTION == "UP" and current_price <= EFFECTIVE_STOP_LOSS):
-                    print(f"- Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
+                    print(f"🚨 Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
                     should_sell = True
                 elif (BID_DIRECTION == "DOWN" and current_price <= EFFECTIVE_STOP_LOSS):
-                    print(f"- Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
+                    print(f"🚨 Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
                     should_sell = True
                 
                 if should_sell:
