@@ -75,16 +75,23 @@ def append_log(lines):
 TARGET_USDC_SIZE = 5.00
 TARGET_COST = 0.43
 
-TRADE_WINDOW_MINUTE = 14
+TRADE_WINDOW_MINUTE = 15
 ABORT_TRADE_WINDOW_MINUTE = 6
 HARD_EXIT_SECONDS = 150
 
-
-STOP_LOSS_THRESHOLD_PRICE = 0.31
+# minimum stop loss price
+HARD_STOP_LOSS_PRICE = 0.35
+# preserve 75% of the capital in the event of a stop loss 
+CAPITAL_PRESERVATION_RATIO = 0.75
 UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
 TRAILING_STOP_PERCENT = 0.10  # Trail the peak by 10%
+# TRAILING_ACTIVE_GATE_MULTIPLE decides how much the trailing stop loss gate should turn active
+# for eg. ACTIVE_BID_PRICE = 0.50
+# TRAILING_GATE_PRICE = ACTIVE_BID_PRICE * TRAILING_ACTIVE_GATE_MULTIPLE
+# 0.575 = 0.5 * 1.15
+# thus, at price 0.575, the trailing stop loss gate activates and updates the stop loss numbers
 TRAILING_ACTIVE_GATE_MULTIPLE = 1.15
 ASK_VS_BID_SPREAD = 0.04
 
@@ -144,7 +151,6 @@ def run_bot(event_url):
         # sample end time: 2025-12-21T10:15:00Z
         tokens, market_name, end_time = utils.get_market_by_slug(utils.extract_slug(event_url))
         highest_price_seen = 0.0      # Initialize peak tracker to help with trailing stop-loss
-        effective_stop_loss = 0.0
         append_log([
             "",
             event_url,
@@ -173,7 +179,7 @@ def run_bot(event_url):
         active_token_id = None
         ACTIVE_BID_PRICE = None
         IN_ARBITRAGE = False
-        effective_stop_loss = STOP_LOSS_THRESHOLD_PRICE
+        EFFECTIVE_STOP_LOSS = HARD_STOP_LOSS_PRICE
         TRAILING_ACTIVE = False
         # track the last 5 prices for the ACTIVE position to filter noise
         last_ten_up_bids = deque(maxlen = 10)
@@ -276,7 +282,7 @@ def run_bot(event_url):
 
             # 3. ENTER BID WINDOW
             if IN_POSITION:
-                print(f"You have an ACTIVE position. bid: {BID_DIRECTION} | shares_amount: {shares} | total_invested_size: {ACTIVE_BID_PRICE * shares} | trailing_stop_loss_price: {effective_stop_loss}")
+                print(f"You have an ACTIVE position. bid: {BID_DIRECTION} | shares_amount: {shares} | total_invested_size: {ACTIVE_BID_PRICE * shares} | Effective stop loss price: {EFFECTIVE_STOP_LOSS}")
             if not IN_POSITION and SHOULD_BID and not IN_ARBITRAGE and seconds_left < TRADE_WINDOW_MINUTE * 60 and seconds_left >= ABORT_TRADE_WINDOW_MINUTE * 60:
                 print(f"👀 Monitoring ACTIVE. Looking for BIDS above {TARGET_COST} | UP Mean: {up_mean_price:.3f} | DOWN Mean: {down_mean_price:.3f}")
                 dist_up = abs(bid_up - TARGET_COST)
@@ -306,6 +312,7 @@ def run_bot(event_url):
                             SHOULD_BID = False
                             BID_DIRECTION = "UP"
                             ACTIVE_BID_PRICE = round(bid_up, 2)
+                            EFFECTIVE_STOP_LOSS = round(ACTIVE_BID_PRICE * CAPITAL_PRESERVATION_RATIO, 2)
                             append_log([
                                 f"✅ BUY UP @ {round(bid_up, 2)} on shares: {round(shares, 2)}. total size: {shares * bid_up}"
                             ])
@@ -332,6 +339,7 @@ def run_bot(event_url):
                             SHOULD_BID = False
                             BID_DIRECTION = "DOWN"
                             ACTIVE_BID_PRICE = round(bid_down, 2)
+                            EFFECTIVE_STOP_LOSS = round(ACTIVE_BID_PRICE * CAPITAL_PRESERVATION_RATIO, 2)
                             append_log([
                                 f"✅ BUY DOWN @ {round(bid_down, 2)} on shares: {round(shares, 2)}. total size: {shares * bid_down}"
                             ])
@@ -360,36 +368,41 @@ def run_bot(event_url):
                 if current_price > highest_price_seen:
                     highest_price_seen = current_price
                     print(f"New highest price seen: ${highest_price_seen:.2f}")
-
+                # ------------------------- DYNAMIC STOP LOSS LOGIC -----------------------
                 # Calculate the dynamic trailing stop floor
-                trailing_floor = highest_price_seen * (1 - TRAILING_STOP_PERCENT)
+                # trailing_floor = highest_price_seen * (1 - TRAILING_STOP_PERCENT)
                 # Define the Profit Cap (e.g., 10% above entry)
                 # This prevents the stop loss from trailing higher than your target
-                stop_loss_cap = round(ACTIVE_BID_PRICE * UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES, 2)
+                # stop_loss_cap = round(ACTIVE_BID_PRICE * UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES, 2)
 
                 # if trailing floor is below ACTIVE_BID_PRICE, update the effective_stop_loss price, otherwise leave it
-                if TRAILING_ACTIVE and (round(trailing_floor, 2) > effective_stop_loss and effective_stop_loss < stop_loss_cap):
-                    effective_stop_loss = round(min(trailing_floor, stop_loss_cap), 2)
-                    print(f"👉 📈 Effective stop loss trailing improved. New stop loss: {round(effective_stop_loss, 2)}")
-                if effective_stop_loss > ACTIVE_BID_PRICE:
-                    print(f"🔒🟢 No loss trade achieved! Good Job! Stop Loss Price: {effective_stop_loss} | Active Bid Price: {ACTIVE_BID_PRICE}")
-                # conditions to STOP SELL
-                should_sell = False
-                # rule 1: BID is UP and mean up price is below effective stop loss price
-                if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "UP" and up_mean_price <= effective_stop_loss):
-                    print(f"- Should sell because UP mean price is below effective_stop_loss. UP mean price: {up_mean_price}")
-                    should_sell = True
-                # rule 2: BID is DOWN and mean down price is below effective stop loss price
-                if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "DOWN" and down_mean_price <= effective_stop_loss):
-                    print(f"- Should sell because DOWN mean price is below effective_stop_loss. DOWN mean price: {down_mean_price}")
-                    should_sell = True
+                # if TRAILING_ACTIVE and (round(trailing_floor, 2) > effective_stop_loss and effective_stop_loss < stop_loss_cap):
+                #     effective_stop_loss = round(min(trailing_floor, stop_loss_cap), 2)
+                #     print(f"👉 📈 Effective stop loss trailing improved. New stop loss: {round(effective_stop_loss, 2)}")
+                # if effective_stop_loss > ACTIVE_BID_PRICE:
+                #     print(f"🔒🟢 No loss trade achieved! Good Job! Stop Loss Price: {effective_stop_loss} | Active Bid Price: {ACTIVE_BID_PRICE}")
+                # # conditions to STOP SELL
+                # should_sell = False
+                # # rule 1: BID is UP and mean up price is below effective stop loss price
+                # if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "UP" and up_mean_price <= effective_stop_loss):
+                #     print(f"- Should sell because UP mean price is below effective_stop_loss. UP mean price: {up_mean_price}")
+                #     should_sell = True
+                # # rule 2: BID is DOWN and mean down price is below effective stop loss price
+                # if (current_price and isinstance(current_price, (int, float)) and current_price <= effective_stop_loss) and (BID_DIRECTION == "DOWN" and down_mean_price <= effective_stop_loss):
+                #     print(f"- Should sell because DOWN mean price is below effective_stop_loss. DOWN mean price: {down_mean_price}")
+                #     should_sell = True
+                # ------------------------- DYNAMIC STOP LOSS LOGIC -----------------------
                 # rule 3: if current_price is below emergency stop loss price, sell immediately
-                if (current_price and isinstance(current_price, (int, float)) and current_price <= STOP_LOSS_THRESHOLD_PRICE):
-                    print(f"- Should sell because current_price: {current_price} is below emergency stop loss price: {STOP_LOSS_THRESHOLD_PRICE}")
+                
+                if (BID_DIRECTION == "UP" and current_price <= EFFECTIVE_STOP_LOSS):
+                    print(f"- Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
+                    should_sell = True
+                elif (BID_DIRECTION == "DOWN" and current_price <= EFFECTIVE_STOP_LOSS):
+                    print(f"- Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
                     should_sell = True
                 
                 if should_sell:
-                    print(f"\n🚨 STOP LOSS TRIGGERED. Effective stop loss price is ${effective_stop_loss}. Price dropped to ${current_price}. Attempting to SELL ALL.")
+                    print(f"\n🚨 STOP LOSS TRIGGERED. Price dropped to ${current_price}. effective stop loss price: {EFFECTIVE_STOP_LOSS}. Attempting to SELL ALL.")
                     try:
                         sell_response = execute_stop_loss(stop_loss_id, shares, "SELL", MAX_SLIPPAGE)
                         if sell_response and sell_response.get("success"):
