@@ -85,7 +85,7 @@ UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
 TRAILING_STOP_PERCENT = 0.10  # Trail the peak by 10%
-TRAILING_ACTIVE_GATE = 0.53
+TRAILING_ACTIVE_GATE_MULTIPLE = 1.15
 ASK_VS_BID_SPREAD = 0.04
 
 # Arbitrage total cost must NOT be higher than this value
@@ -353,7 +353,7 @@ def run_bot(event_url):
                 current_price = bid_up if BID_DIRECTION == "UP" else bid_down
                 stop_loss_id = up_id if BID_DIRECTION == "UP" else down_id
 
-                if not TRAILING_ACTIVE and current_price >= TRAILING_ACTIVE_GATE:
+                if not TRAILING_ACTIVE and current_price >= ACTIVE_BID_PRICE * TRAILING_ACTIVE_GATE_MULTIPLE:
                     print(f"🚀 THRESHOLD REACHED: Trailing stop-loss is now ACTIVE.")
                     TRAILING_ACTIVE = True
                 # update the highest_price_seen to calculate dynamic stop loss price
