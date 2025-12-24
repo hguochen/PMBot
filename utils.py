@@ -2,6 +2,7 @@ import ast
 import os
 import re
 import requests
+from typing import List, Tuple
 
 # =========================================================
 # 4. UTILITY FUNCTIONS
@@ -90,3 +91,38 @@ def load_event_urls(file_path="events.txt"):
         ]
 
     return events
+
+def read_polymarket_events(file_path: str) -> List[Tuple[str, str]]:
+    """
+    Reads a file containing Polymarket event lines and extracts
+    the event URL and event name.
+
+    Expected line format:
+    <URL> - <EVENT_NAME>
+
+    Returns:
+        List of (url, event_name)
+    """
+    events = []
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Split only on the first delimiter
+            parts = line.split(" - ", 1)
+            if len(parts) != 2:
+                continue  # skip malformed lines
+
+            url, event_name = parts
+            events.append((url.strip(), event_name.strip()))
+
+    return events
+
+
+if __name__ == "__main__":
+    events = read_polymarket_events("events/btc_15m_events_12242025.txt")
+    for url, name in events:
+        print(f"{url} - {name}")

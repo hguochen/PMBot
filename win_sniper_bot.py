@@ -15,51 +15,11 @@ from datetime import datetime, timezone
 import utils
 import argparse
 
-"""
-BTC 15m "Arb-Sniper" Bot Strategy Documentation
-
-1. Core Strategy Overview
-The bot operates on a dual-logic framework. It first scans for mathematical arbitrage opportunities (guaranteed profit) and, if none are found,
-falls back to a directional momentum "sniper" strategy that bets on high-probability outcomes.
-
-A. The Dutch Book (Arbitrage) EngineThis is the bot's primary goal. It exploits market mispricings where the total cost of buying both "YES"
-and "NO" (Up and Down) tokens is less than the guaranteed $1.00 payout.The Math: bid_up + bid_down <= ARBITRAGE_THRESHOLD (0.94).The Logic: If
-the combined price is $0.94$, the bot buys both sides. Since one side must resolve to $1.00$, the bot locks in a $0.06 (6.38%)$ profit regardless
-of Bitcoin's price movement.Execution Priority: It uses an "Asymmetric Entry," buying the more expensive (trending) side first to capture the
-price before it moves higher.B. The Directional "Sniper" EngineIf no arbitrage is available, the bot scans for high-certainty directional moves
-during a specific time window.Target Entry: Only executes when an outcome is priced at $0.82$ or higher (TARGET_COST).The Logic: This bets on
-"momentum follow-through"—the idea that if an outcome is already 82% likely, it is highly probable to finish at 100%.
-
-2. Execution & Risk ManagementTo protect the P/L and prevent the "one big loss wipes out ten wins" scenario, the bot uses several advanced
-safety layers
-Slippage Guard - MAX_SLIPPAGE (0.02) - Refreshes the price milliseconds before buying. Aborts if the price jumps >$0.02 to avoid "buying the top."
-Stop-Loss - STOP_LOSS_THRESHOLD (0.65) - Automatically liquidates directional positions if the price drops below $0.65 to prevent a total 100% loss.
-Time Window - 11m to 4m left - Only enters trades when enough time remains for the move to settle, but exits before the "final 4m" volatility crush.
-Size Control - TARGET_USDC_SIZE (5.00) - Keeps every trade at a fixed $5.00 limit to ensure consistent position sizing and capital preservation.
-
-3. Technical Workflow
-Market Discovery: Fetches active 15m BTC market slugs from a local events.txt file.
-
-Continuous Polling: Uses a while True loop with a 0.5s sleep timer to monitor the order book for both "UP" and "DOWN" tokens.
-
-Validation: Ensures all bid data is numeric and non-null before attempting calculations to avoid script crashes.
-
-Order Placement: Uses the py-clob-client to build and sign limit orders locally before posting them to the Polygon blockchain.
-
-Logging: Every action (Buy, Sell, Stop-Loss, Arb-Entry) is recorded in a timestamped log file for P/L auditing.
-
-4. Profitability Analysis (Current Setup)The current configuration is optimized for capital safety over raw volume.Risk-Reward:
-By sniping at $0.82$ and stopping out at $0.65$, the bot risks roughly $0.17$ to gain $0.18$. This creates a near 1:1 risk-reward ratio,
-meaning the bot only needs a >50% win rate to be profitable.Arbitrage Edge: The arbitrage logic provides "risk-free" gains that bolster the
-overall P/L, acting as a cushion for the directional trades.
-
-"""
-
 # =========================================================
 # 0. LOGGING SETTINGS
 # =========================================================
-EVENTS_FILE = "events/btc_15m_events_12232025.txt"
-LOG_FILE = "logs/btc_15m_events_12232025_logs.txt"
+EVENTS_FILE = "events/btc_15m_events_12242025.txt"
+LOG_FILE = "logs/btc_15m_events_12242025_logs.txt"
 
 def append_log(lines):
     """
@@ -72,18 +32,23 @@ def append_log(lines):
 # =========================================================
 # 1. HARDCODED TARGET SETTINGS
 # =========================================================
+# amount of USDC to buy 
 TARGET_USDC_SIZE = 5.00
-TARGET_COST = 0.43
+# minimum cost price to purchase each share
+TARGET_COST = 0.40
+# maximum cost price to purchase each share
 MAX_TARGET_COST = 0.70
 
-TRADE_WINDOW_MINUTE = 10
+# polymarket timer counts down from 15min, start trading from TRADE_WINDOW_MINUTE onwards
+TRADE_WINDOW_MINUTE = 14
+TRADE_WINDOW_SECONDS = 870
 ABORT_TRADE_WINDOW_MINUTE = 6
-HARD_EXIT_SECONDS = 150
+HARD_EXIT_SECONDS = 120
 
 # minimum stop loss price
 HARD_STOP_LOSS_PRICE = 0.35
-# preserve 75% of the capital in the event of a stop loss 
-CAPITAL_PRESERVATION_RATIO = 0.75
+# preserve 70% of the capital in the event of a stop loss 
+CAPITAL_PRESERVATION_RATIO = 0.65
 UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
 # the lower the percent, the more aggressive the stop_loss_price moves up
@@ -123,22 +88,22 @@ exchange = ccxt.binance()
 # 3. MAIN BOT
 # =========================================================
 def run_events():
-    event_urls = utils.load_event_urls(EVENTS_FILE)
-    if not event_urls:
+    events = utils.read_polymarket_events(EVENTS_FILE)
+    if not events:
         print(f"❌ No events found in {EVENTS_FILE}")
         return
 
-    for event_url in event_urls:
+    for url, name in events:
         print("\n" + "=" * 60)
-        print(f"🎯 Processing event: {event_url}")
+        print(f"🎯 Processing event: {name} - {url}")
         try:
-            run_bot(event_url)
+            run_bot(url)
             append_log([
-                f"🟢 Run successful - {event_url}"
+                f"🟢 Run successful - {url}"
             ])
         except Exception as e:
             append_log([
-                f"❌ Exception occurred running {event_url}: {e}"
+                f"❌ Exception occurred running {url}: {e}"
             ])
         print("=" * 60)
     print(f"All events in {EVENTS_FILE} ran successfully")
@@ -196,11 +161,13 @@ def run_bot(event_url):
                 return
 
             # 2. FETCH PRICES
-            bid_up = round(get_live_ask(up_id), 2)
-            bid_down = round(get_live_ask(down_id), 2)
-            if bid_up is None or bid_down is None:
+            raw_up = get_live_ask(up_id)
+            raw_down = get_live_ask(down_id)
+            if raw_up is None or raw_down is None:
                 print(f"⚠️ Skipping tick: API returned None for prices. UP: {bid_up} | DOWN: {bid_down}")
                 continue
+            bid_up = round(raw_up, 2)
+            bid_down = round(raw_down, 2)
             # calculate the rolling mean price of up and down bid prices
             last_ten_up_bids.append(bid_up)
             last_ten_down_bids.append(bid_down)
@@ -217,7 +184,7 @@ def run_bot(event_url):
             print(f"📈 Currently running market: {market_name} - {event_url}")
             print(f"📖 Time Left: {seconds_left//60:.0f}m {seconds_left%60:.0f}s | In Trade?: {IN_POSITION} | ⬆️ UP Bid: {bid_up or 'N/A'} | ⬇️ DOWN Bid: {bid_down or 'N/A'}")
 
-            if SHOULD_BID and seconds_left > ABORT_TRADE_WINDOW_MINUTE * 60 and seconds_left < TRADE_WINDOW_MINUTE * 60:
+            if SHOULD_BID and seconds_left > ABORT_TRADE_WINDOW_MINUTE * 60 and seconds_left < TRADE_WINDOW_SECONDS:
                 print(f"🟢 Bid window: OPEN.")
             else:
                 print(f"❌ Bid window: Closed.")
@@ -284,7 +251,7 @@ def run_bot(event_url):
             # 3. ENTER BID WINDOW
             if IN_POSITION:
                 print(f"You have an ACTIVE position. bid: {BID_DIRECTION} | shares_amount: {shares} | total_invested_size: {ACTIVE_BID_PRICE * shares} | Effective stop loss price: {EFFECTIVE_STOP_LOSS}")
-            if not IN_POSITION and SHOULD_BID and not IN_ARBITRAGE and seconds_left < TRADE_WINDOW_MINUTE * 60 and seconds_left >= ABORT_TRADE_WINDOW_MINUTE * 60:
+            if not IN_POSITION and SHOULD_BID and not IN_ARBITRAGE and seconds_left < TRADE_WINDOW_SECONDS and seconds_left >= ABORT_TRADE_WINDOW_MINUTE * 60:
                 print(f"👀 Monitoring ACTIVE. Looking for BIDS above {TARGET_COST} | UP Mean: {up_mean_price:.3f} | DOWN Mean: {down_mean_price:.3f}")
                 dist_up = abs(bid_up - TARGET_COST)
                 dist_down = abs(bid_down - TARGET_COST)
@@ -295,8 +262,8 @@ def run_bot(event_url):
                 # - Price is more than TARGET_COST
                 # - Price is less than MAX_TARGET_COST
                 # - Price is on a trending momentum by being higher than the last 10 prices
-                up_eligible = bid_up >= TARGET_COST and bid_up <= MAX_TARGET_COST and bid_up >= up_mean_price and bid_up >= bid_down
-                down_eligible = bid_down >= TARGET_COST and bid_up <= MAX_TARGET_COST and bid_down >= down_mean_price and bid_down > bid_up
+                up_eligible = bid_up >= TARGET_COST and bid_up <= MAX_TARGET_COST and bid_up >= up_mean_price and bid_up <= bid_down
+                down_eligible = bid_down >= TARGET_COST and bid_up <= MAX_TARGET_COST and bid_down >= down_mean_price and bid_down < bid_up
 
                 # decision matrix to buy UP or DOWN
                 if up_eligible and down_eligible:
@@ -465,7 +432,7 @@ def run_bot(event_url):
                         ])
                         print(f"- ❌ STOP LOSS LIQUIDATION FAILED! ERROR: {e}")
                         print(f"- ❌ STOP LOSS {BID_DIRECTION} @ {round(current_price, 2)} on shares: {round(shares, 2)}. total size: {shares * current_price}")
-            time.sleep(0.3)
+            time.sleep(0.2)
     except Exception as e:
         append_log([
             f"Error occurred running {market_name}. Error: {e}"
@@ -513,44 +480,52 @@ def execute_with_slippage_guard(token_id, target_price, side="BUY", max_slippage
     return client.post_order(order, OrderType.FOK), shares
 
 def execute_stop_loss(token_id, shares, side="SELL", max_slippage = 0.02):
-    # 1. Quick refresh: Get the very latest price
-    current_bid = get_live_bid(token_id)
-    if not current_bid:
-        print("❌ Could not fetch bid price. Skipping sell.")
-        return None
-
-    # 2. Fetch live on-chain balance
-    balance_info = client.get_balance_allowance(
-        BalanceAllowanceParams(
-            asset_type=AssetType.CONDITIONAL,
-            token_id=token_id
+    # 1. Repeatedly submits FAK(Fill-and-Kill) orders until the conditional token balance for the specific market is 0
+    response = None
+    while True:
+        # 1. Fetch live on-chain balance
+        balance_info = client.get_balance_allowance(
+            BalanceAllowanceParams(
+                asset_type=AssetType.CONDITIONAL,
+                token_id=token_id
+            )
         )
-    )
-    balance = float(balance_info.get("balance", 0)) / 1e6
-    if (balance <= 0.01):
-        print(f"❌ Stop-loss aborted: No shares found in wallet (Balance: {balance})")
-        return None
-    # Market SELL: amount = number of shares. 
-    # API Rule: Sell orders must have max 2 decimal places for the share amount.
-    sell_qty = math.floor(balance * 100) / 100.0
-    print(f"-------------------Attempting STOP LOSS SELL -----------------------")
-    print(f"Wallet Balance: {balance}")
-    print(f"Targeting Bid: {current_bid} | Selling Qty: {sell_qty}")
-    print(f"-------------------Attempting STOP LOSS SELL -----------------------")
+        balance = float(balance_info.get("balance", 0)) / 1e6
 
-    # 3. execute the stop loss
-    order = client.create_market_order(MarketOrderArgs(
-        amount = round(sell_qty, 2), # number of shares to sell
-        side = side,
-        token_id = token_id
-    ))
-    return client.post_order(order, OrderType.FOK)
+        if balance < 0.01:
+            print(f"✅ Liquidation complete. Final Balance: {balance}")
+            return response
 
-# def execute_stop_loss_FAK_retry(token_id, shares, side="SELL", max_slippage = 0.02):
-#     """
-#     Repeatedly submit FAK sell orders until all shares are sold.
-#     This guarantees liquidation unless the book is completely empty.
-#     """
+        # 2. Quick refresh: Get the very latest price
+        current_bid = get_live_bid(token_id)
+        if not current_bid:
+            print("⚠️ No liquidity found. Waiting to retry...")
+            continue
+        # Market SELL: amount = number of shares. 
+        # API Rule: Sell orders must have max 2 decimal places for the share amount.
+        sell_qty = math.floor(balance * 100) / 100.0
+        print(f"-------------------Attempting STOP LOSS SELL -----------------------")
+        print(f"Sell Type: Fill-and-Kill")
+        print(f"Wallet Balance: {balance}")
+        print(f"Targeting Bid: {current_bid} | Selling Qty: {sell_qty}")
+        print(f"-------------------Attempting STOP LOSS SELL -----------------------")
+
+        # 3. execute the stop loss
+        try:
+            order = client.create_market_order(MarketOrderArgs(
+                amount = round(sell_qty, 2), # number of shares to sell
+                side = side,
+                token_id = token_id
+            ))
+            response = client.post_order(order, OrderType.FAK)
+            if response and response.get("success"):
+                print(f"🟢 Successfully processed partial/full fill.")
+            else:
+                print(f"❌ Stop Loss Sell rejected or expired. Retrying...")
+        except Exception as e:
+            print(f"❌ Stop Loss execution Error: {e}. Retrying...")
+        time.sleep(0.2)
+    return response
 
 def get_live_ask(token_id):
     """
