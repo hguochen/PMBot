@@ -361,13 +361,14 @@ def run_bot(event_url):
                 current_price = bid_up if BID_DIRECTION == "UP" else bid_down
                 stop_loss_id = up_id if BID_DIRECTION == "UP" else down_id
 
-                if not TRAILING_ACTIVE and current_price >= ACTIVE_BID_PRICE * TRAILING_ACTIVE_GATE_MULTIPLE:
-                    print(f"🚀 THRESHOLD REACHED: Trailing stop-loss is now ACTIVE.")
-                    TRAILING_ACTIVE = True
-                # update the highest_price_seen to calculate dynamic stop loss price
                 if current_price > highest_price_seen:
                     highest_price_seen = current_price
                     print(f"New highest price seen: ${highest_price_seen:.2f}")
+                # if not TRAILING_ACTIVE and current_price >= ACTIVE_BID_PRICE * TRAILING_ACTIVE_GATE_MULTIPLE:
+                #     print(f"🚀 THRESHOLD REACHED: Trailing stop-loss is now ACTIVE.")
+                #     TRAILING_ACTIVE = True
+                # update the highest_price_seen to calculate dynamic stop loss price
+                
                 # ------------------------- DYNAMIC STOP LOSS LOGIC -----------------------
                 # Calculate the dynamic trailing stop floor
                 # trailing_floor = highest_price_seen * (1 - TRAILING_STOP_PERCENT)
@@ -393,7 +394,7 @@ def run_bot(event_url):
                 #     should_sell = True
                 # ------------------------- DYNAMIC STOP LOSS LOGIC -----------------------
                 # rule 3: if current_price is below emergency stop loss price, sell immediately
-                
+                should_sell = False
                 if (BID_DIRECTION == "UP" and current_price <= EFFECTIVE_STOP_LOSS):
                     print(f"- Should sell because current_price: {current_price} is below effective stop loss price: {EFFECTIVE_STOP_LOSS}")
                     should_sell = True
