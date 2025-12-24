@@ -79,7 +79,7 @@ TRADE_WINDOW_MINUTE = 14
 ABORT_TRADE_WINDOW_MINUTE = 6
 HARD_EXIT_SECONDS = 150
 
-BUFFER_COST_THRESHOLD = 0.01
+
 STOP_LOSS_THRESHOLD_PRICE = 0.31
 UPDATE_EFFECTIVE_STOP_LOSS_MULTIPLES = 1.20
 MAX_SLIPPAGE = 0.02
@@ -278,16 +278,27 @@ def run_bot(event_url):
             if IN_POSITION:
                 print(f"You have an ACTIVE position. bid: {BID_DIRECTION} | shares_amount: {shares} | total_invested_size: {ACTIVE_BID_PRICE * shares} | trailing_stop_loss_price: {effective_stop_loss}")
             if not IN_POSITION and SHOULD_BID and not IN_ARBITRAGE and seconds_left < TRADE_WINDOW_MINUTE * 60 and seconds_left >= ABORT_TRADE_WINDOW_MINUTE * 60:
-                print(f"👀 Monitoring ACTIVE. Looking for BIDS above {TARGET_COST - BUFFER_COST_THRESHOLD} | UP Mean: {up_mean_price:.3f} | DOWN Mean: {down_mean_price:.3f}")
+                print(f"👀 Monitoring ACTIVE. Looking for BIDS above {TARGET_COST} | UP Mean: {up_mean_price:.3f} | DOWN Mean: {down_mean_price:.3f}")
                 dist_up = abs(bid_up - TARGET_COST)
                 dist_down = abs(bid_down - TARGET_COST)
+                
+                # check eligibility for both sides independently
+                target_side = None
+                up_eligible = bid_up >= TARGET_COST and bid_up >= up_mean_price
+                down_eligible = bid_down >= TARGET_COST and bid_down >= down_mean_price
+
+                # decision matrix to buy UP or DOWN
+                if up_eligible and down_eligible:
+                    # if both hit target, pick the one closer to the target (the "purer" entry)
+                    target_side = "UP" if dist_up <= dist_down else "DOWN"
+                elif up_eligible:
+                    target_side = "UP"
+                elif down_eligible:
+                    target_side = "DOWN"
 
                 # 3.1 Bid UP section
-                if not IN_POSITION and bid_up >= TARGET_COST - BUFFER_COST_THRESHOLD and dist_up < dist_down:
-                    if bid_up < up_mean_price:
-                        print(f"❌ Target hit for UP, but price is below Mean. Bid UP price: {bid_up} | UP Mean Price: {up_mean_price:.2f} Waiting for upward momentum...")
-                        continue
-                    print(f"🔥 Target hit! Bid UP price: {bid_up} | UP Mean Price: {up_mean_price:.2f}. Attempting to BUY...")
+                if target_side == "UP":
+                    print(f"🔥 TREND CONFIRMED: UP ({bid_up}) >= Mean ({up_mean_price:.2f}). BUYING...")
                     try:
                         resp, shares = execute_with_slippage_guard(up_id, bid_up, "BUY", MAX_SLIPPAGE)
                         if resp and resp.get("success"):
@@ -296,26 +307,24 @@ def run_bot(event_url):
                             BID_DIRECTION = "UP"
                             ACTIVE_BID_PRICE = round(bid_up, 2)
                             append_log([
-                                f"- BUY UP @ {round(bid_up, 2)} on shares: {round(shares, 2)}. total size: {shares * bid_up}"
+                                f"✅ BUY UP @ {round(bid_up, 2)} on shares: {round(shares, 2)}. total size: {shares * bid_up}"
                             ])
-                            print("🟢📈 You have successfully placed a UP. Good Luck!")
+                            print("✅📈 You have successfully placed a UP. Good Luck!")
                             print(f"🟢 up_id: {up_id}")
                             print(f"🟢 Purchase complete! Purchase Details:")
                             print("🟢 bid direction: UP")
                             print(f"🟢 price: {round(bid_up, 2)}")
                             print(f"🟢 shares count: {shares}")
+                        else:
+                            print(f"❌ Buy UP not successful!")
                     except Exception as e:
                         append_log([
-                            f"❌ BUY UP couldn't be filled. Error: {e}"
+                            f"❌ BUY UP Failed. UP price: {bid_up} | UP mean price: {up_mean_price:.2f} | Error: {e}"
                         ])
-                        print(f"❌ BUY UP couldn't be filled. Error: {e}")
-                        continue
+                        print(f"❌ BUY UP Failed. UP price: {bid_up} | UP mean price: {up_mean_price:.2f} | Error: {e}")
                 # 3.2 Bid DOWN section
-                elif not IN_POSITION and bid_down >= TARGET_COST - BUFFER_COST_THRESHOLD and dist_down < dist_up:
-                    if bid_down < down_mean_price:
-                        print(f"❌ Target hit for DOWN, but price is below Mean. Bid DOWN price: {bid_down} | DOWN Mean Price: {down_mean_price:.2f} Waiting for upward momentum...")
-                        continue
-                    print(f"🔥 Target hit! Bid UP price: {bid_down} | UP Mean Price: {down_mean_price:.2f}. Attempting to BUY...")
+                elif target_side == "DOWN":
+                    print(f"🔥 TREND CONFIRMED: DOWN {bid_down} >= Mean {down_mean_price:.2f}. BUYING...")
                     try:
                         resp, shares = execute_with_slippage_guard(down_id, bid_down, "BUY", MAX_SLIPPAGE)
                         if resp and resp.get("success"):
@@ -324,22 +333,21 @@ def run_bot(event_url):
                             BID_DIRECTION = "DOWN"
                             ACTIVE_BID_PRICE = round(bid_down, 2)
                             append_log([
-                                f"- BUY DOWN @ {round(bid_down, 2)} on shares: {round(shares, 2)}. total size: {shares * bid_down}"
+                                f"✅ BUY DOWN @ {round(bid_down, 2)} on shares: {round(shares, 2)}. total size: {shares * bid_down}"
                             ])
-                            print("🟢📈 You have successfully placed a bid DOWN. Good Luck!")
+                            print("✅📈 You have successfully placed a bid DOWN. Good Luck!")
                             print(f"🟢 down_id: {down_id}")
                             print(f"🟢 Purchase complete! Purchase Details:")
                             print("🟢 bid direction: DOWN")
                             print(f"🟢 price: {round(bid_down, 2)}")
                             print(f"🟢 shares count: {round(shares, 2)}")
                         else:
-                            print(f"❌ Buy not successful!")
+                            print(f"❌ Buy DOWN not successful!")
                     except Exception as e:
                         append_log([
-                            f"❌ BUY DOWN couldn't be filled. Error: {e}"
+                            f"❌ BUY DOWN Failed. UP price: {bid_down} | UP mean price: {down_mean_price:.2f} | Error: {e}"
                         ])
-                        print(f"❌ BUY DOWN couldn't be filled. Error: {e}")
-                        continue
+                        print(f"❌ BUY DOWN Failed. UP price: {bid_down} | UP mean price: {down_mean_price:.2f} | Error: {e}")
             # 4. STOP LOSS LOGIC
             if IN_POSITION and not IN_ARBITRAGE:
                 current_price = bid_up if BID_DIRECTION == "UP" else bid_down
