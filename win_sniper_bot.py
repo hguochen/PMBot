@@ -198,7 +198,7 @@ def run_bot(event_url):
                 print(f"⏰ HARD EXIT TRIGGERED. {seconds_left:.0f}s left. Closing to avoid liquidity trap.")
                 exit_id = up_id if BID_DIRECTION == "UP" else down_id
                 try:
-                    hard_exit_response = execute_stop_loss(exit_id, shares, "SELL", MAX_SLIPPAGE)
+                    hard_exit_response = execute_stop_loss(exit_id, shares, EFFECTIVE_STOP_LOSS, "SELL", MAX_SLIPPAGE)
                     if hard_exit_response and hard_exit_response.get("success"):
                         IN_POSITION = False
                         SHOULD_BID = False
@@ -377,7 +377,7 @@ def run_bot(event_url):
                 if should_sell:
                     print(f"\n🚨 STOP LOSS TRIGGERED. Price dropped to ${current_price}. effective stop loss price: {EFFECTIVE_STOP_LOSS}. Attempting to SELL ALL.")
                     try:
-                        sell_response = execute_stop_loss(stop_loss_id, shares, "SELL", MAX_SLIPPAGE)
+                        sell_response = execute_stop_loss(stop_loss_id, shares, EFFECTIVE_STOP_LOSS, "SELL", MAX_SLIPPAGE)
                         if sell_response and sell_response.get("success"):
                             IN_POSITION = False
                             SHOULD_BID = False
@@ -396,7 +396,7 @@ def run_bot(event_url):
                             continue
                         else:
                             print("⚠️ Order failed to fill immediately. Retrying once...")
-                            retry_response = execute_stop_loss(stop_loss_id, shares, "SELL", MAX_SLIPPAGE)
+                            retry_response = execute_stop_loss(stop_loss_id, shares, EFFECTIVE_STOP_LOSS, "SELL", MAX_SLIPPAGE)
                             if retry_response and retry_response.get("success"):
                                 IN_POSITION = False
                                 SHOULD_BID = False
@@ -479,8 +479,9 @@ def execute_with_slippage_guard(token_id, target_price, side="BUY", max_slippage
     ))
     return client.post_order(order, OrderType.FOK), shares
 
-def execute_stop_loss(token_id, shares, side="SELL", max_slippage = 0.02):
+def execute_stop_loss(token_id, shares, stop_loss_price, side="SELL", max_slippage = 0.02):
     # 1. Repeatedly submits FAK(Fill-and-Kill) orders until the conditional token balance for the specific market is 0
+    print(f"INSIDE execute_stop_loss(): STOP_LOSS_PRICE: {stop_loss_price}")
     response = None
     while True:
         # 1. Fetch live on-chain balance
@@ -501,6 +502,10 @@ def execute_stop_loss(token_id, shares, side="SELL", max_slippage = 0.02):
         if not current_bid:
             print("⚠️ No liquidity found. Waiting to retry...")
             continue
+        print(f"Stop loss price: {current_id}, Effective stop loss price: {stop_loss_price}")
+        if current_bid > stop_loss_price:
+            print(f"🚀💥 Aborting Stop Loss Execution. Current price: {current_bid} has recovered from Stop loss price: {stop_loss_price}")
+            break
         # Market SELL: amount = number of shares. 
         # API Rule: Sell orders must have max 2 decimal places for the share amount.
         sell_qty = math.floor(balance * 100) / 100.0
