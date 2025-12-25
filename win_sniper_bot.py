@@ -502,7 +502,7 @@ def execute_stop_loss(token_id, shares, stop_loss_price, side="SELL", max_slippa
         if not current_bid:
             print("⚠️ No liquidity found. Waiting to retry...")
             continue
-        print(f"Stop loss price: {current_id}, Effective stop loss price: {stop_loss_price}")
+        print(f"Stop loss price: {current_bid}, Effective stop loss price: {stop_loss_price}")
         if current_bid > stop_loss_price:
             print(f"🚀💥 Aborting Stop Loss Execution. Current price: {current_bid} has recovered from Stop loss price: {stop_loss_price}")
             break
