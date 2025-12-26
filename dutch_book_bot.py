@@ -45,7 +45,7 @@ MAX_SLIPPAGE = 0.02
 ASK_VS_BID_SPREAD = 0.04
 
 # must be < 1 for a profit
-TARGET_PAIR_COST = 0.90
+TARGET_PAIR_COST = 0.88
 # arbitrage pair cost
 ARBITRAGE_PAIR_COST = 0.95
 # minimum leg 1 bid cost price
