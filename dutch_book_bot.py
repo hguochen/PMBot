@@ -23,8 +23,8 @@ LOG_FILE = "logs/btc_15m_events_12262025_logs.txt"
 # =========================================================
 
 # when time is less than value, abort trade
-ABORT_TRADE_WINDOW_MINUTE = 2
-ABORT_TRADE_WINDOW_SECONDS = ABORT_TRADE_WINDOW_MINUTE * 60 + 30
+ABORT_TRADE_WINDOW_MINUTE = 3
+ABORT_TRADE_WINDOW_SECONDS = ABORT_TRADE_WINDOW_MINUTE * 60
 # open trading window
 TRADE_WINDOW_MINUTE = 14
 TRADE_WINDOW_SECONDS = 870
@@ -247,7 +247,6 @@ def run_bot(event_url):
                     ])
                     # cancel the pending leg 2 limit order immediately
                     try:
-                        # TODO: There's a bug where limit order id is not filled. upon LIMIT order post. Figure out why
                         if ACTIVE_LIMIT_ORDER_ID:
                             print(f"🧹 Cleaning up pending Leg 2 Limit Order: {ACTIVE_LIMIT_ORDER_ID}")
                             limit_order_cancel_response = client.cancel(order_id = ACTIVE_LIMIT_ORDER_ID)
