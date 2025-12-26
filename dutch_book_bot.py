@@ -45,7 +45,7 @@ MAX_SLIPPAGE = 0.02
 ASK_VS_BID_SPREAD = 0.04
 
 # must be < 1 for a profit
-TARGET_PAIR_COST = 0.88
+TARGET_PAIR_COST = 0.90
 # arbitrage pair cost
 ARBITRAGE_PAIR_COST = 0.95
 # minimum leg 1 bid cost price
@@ -284,7 +284,7 @@ def run_bot(event_url):
             # -----------------------------------------
             # 6. INSTANT ARBITRAGE
             # -----------------------------------------
-            if SHOULD_BID and not IN_POSITION and not IN_ARBITRAGE:
+            if SHOULD_BID and not IN_POSITION and not IN_ARBITRAGE and seconds_left > ABORT_TRADE_WINDOW_SECONDS:
                 # CHECK ARBITRAGE MATH FIRST
                 # We look for a total pair cost below your ARBITRAGE_PAIR_COST
                 combined_cost = bid_up + bid_down
@@ -338,7 +338,13 @@ def run_bot(event_url):
                 # if balance > 0, the limit order was hit!
                 leg_2_shares = float(balance_info.get("balance", 0)) / 1e6
                 if leg_2_shares > 0.1:
-                    print(f"💰 ARBITRAGE ACTIVATED: Leg 2 Limit Order Filled!")
+                    append_log([
+                        f"📈💰 ARBITRAGE ACTIVE: Leg 2 Limit Order Filled!",
+                        f"📈💰 Congratulations! Dutch Book trade LOCKED. No Loss trade achieved!",
+                        f"💰 Leg 1: {LEG_1_BID_DIRECTION} | Leg 1 Shares: {LEG_1_SHARES} | Leg 1 Price: {LEG_1_BID_PRICE} ",
+                        f"💰 Leg 2: {LEG_2_BID_DIRECTION} | Leg 2 Shares: {LEG_2_SHARES} | Leg 2 Price: {LEG_2_BID_PRICE} "
+                    ])
+                    print(f"💰 ARBITRAGE ACTIVE: Leg 2 Limit Order Filled!")
                     IN_ARBITRAGE = True
                     LEG_2_SHARES = leg_2_shares
                     LEG_2_BID_DIRECTION = "DOWN" if LEG_1_BID_DIRECTION == "UP" else "UP"
