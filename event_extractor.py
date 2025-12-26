@@ -11,7 +11,7 @@ with open('event_html.txt', 'r', encoding='utf-8') as f:
 
 # Find all JSON objects that look like market entries
 # Example: {"id":"123","slug":"btc-updown-15m-1766640000","title":"Bitcoin Up or Down - December 25, 12:00AM-12:15AM ET", ...}
-matches = re.findall(r'\{"id":"(\d+)","slug":"(btc-updown-15m-\d+)","title":"(Bitcoin Up or Down - December 25, [^"]+)"', content)
+matches = re.findall(r'\{"id":"(\d+)","slug":"(btc-updown-15m-\d+)","title":"(Bitcoin Up or Down - December 26, [^"]+)"', content)
 
 results = []
 seen_slugs = set()
@@ -28,7 +28,7 @@ if not results:
     for slug in set(slugs):
         # Find the specific ID and Title associated with this slug in the same JSON block
         # Look for the block containing the slug and extract id/title
-        block_match = re.search(r'\{[^{}]*?"id":"(\d+)"[^{}]*?"slug":"' + slug + r'"[^{}]*?"title":"(Bitcoin Up or Down - December 25, [^"]+)"', content)
+        block_match = re.search(r'\{[^{}]*?"id":"(\d+)"[^{}]*?"slug":"' + slug + r'"[^{}]*?"title":"(Bitcoin Up or Down - December 26, [^"]+)"', content)
         if block_match:
             tid, title = block_match.groups()
             url = f"https://polymarket.com/event/{slug}?tid={tid}"

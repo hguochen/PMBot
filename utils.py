@@ -8,8 +8,6 @@ from typing import List, Tuple
 # 4. UTILITY FUNCTIONS
 # =========================================================
 def get_market_by_slug(slug):
-    print(f"🤔 Fetching market data for slug: {slug}")
-    print()
     try:
         url = f"https://gamma-api.polymarket.com/markets/slug/{slug}"
         resp = requests.get(url, timeout=10)
