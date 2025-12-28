@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 # =========================================================
 # 0. LOGGING SETTINGS
 # =========================================================
-EVENTS_FILE = "events/btc_15m_events_12272025.txt"
-LOG_FILE = "logs/btc_15m_events_12272025_logs.txt"
+EVENTS_FILE = "events/btc_15m_events_12282025.txt"
+LOG_FILE = "logs/btc_15m_events_12282025_logs.txt"
 
 # =========================================================
 # 1. HARDCODED TARGET SETTINGS
@@ -26,8 +26,8 @@ ABORT_TRADE_WINDOW_MINUTE = 5
 ABORT_TRADE_WINDOW_SECONDS = ABORT_TRADE_WINDOW_MINUTE * 60
 # open trading window
 TRADE_WINDOW_MINUTE = 14
-TRADE_WINDOW_SECONDS = TRADE_WINDOW_MINUTE * 60 + 30
-# time remaining to execute a hard exit, regardless of current active position win/lose
+TRADE_WINDOW_SECONDS = TRADE_WINDOW_MINUTE * 60 + 50
+# time remaining to execute a hard exit, regardless of current active position win/lose. 2min
 HARD_EXIT_SECONDS = 150
 
 # amount of USDC to fill in each purchase
@@ -37,7 +37,7 @@ HARD_EXIT_ENABLED = True
 # lowest price to execute stop loss SELL order
 HARD_STOP_LOSS_PRICE = 0.35
 # preserve 60% of the capital in the event of a stop loss 
-CAPITAL_PRESERVATION_RATIO = 0.65
+CAPITAL_PRESERVATION_RATIO = 0.60
 # max slippage allowed
 MAX_SLIPPAGE = 0.02
 # price difference between buyer book and seller book
@@ -51,8 +51,10 @@ ARBITRAGE_PAIR_COST = 0.95
 MIN_LEG_1_COST_PRICE = 0.41
 # maximum leg 1 cost price
 MAX_LEG_1_COST_PRICE = 0.48
+# if take profit is enabled, when price ratio reaches TAKE_PROFIT_RATIO, will sell to TP
+TAKE_PROFIT_ENABLED = False
 # gain percentage to trigger an immediate exit (e.g., 0.20 = 20% profit)
-TAKE_PROFIT_RATIO = 0.90
+TAKE_PROFIT_RATIO = 0.75
 
 # =========================================================
 # 2. Polymarket ClobClient SETUP
@@ -88,9 +90,11 @@ def run_bot(event_url):
         print()
         tokens, market_name, end_time = utils.get_market_by_slug(utils.extract_slug(event_url))
         append_log([
-            "",
-            event_url,
-            f"- Market: {market_name}"
+            f"\n{'='*60}",
+            f"🚀 STARTING EVENT: {market_name}",
+            f"🔗 URL: {event_url}",
+            f"⏰ Market End: {end_time}",
+            f"{'='*60}"
         ])
         # If either of above details are missing, abort.
         if not tokens or "Up" not in tokens or "Down" not in tokens or not end_time:
@@ -145,7 +149,9 @@ def run_bot(event_url):
             seconds_left = time_left.total_seconds()
             current_minute = 15 - (seconds_left / 60)
             if seconds_left < 1:
-                print(f"❌ Current market - {market_name} trading window is closed.")
+                log_finish = f"🏁 Market {market_name} closed. Exiting loop."
+                print(log_finish)
+                append_log([log_finish])
                 return
 
             # -----------------------------------------
@@ -190,21 +196,21 @@ def run_bot(event_url):
             # by default, if BUY is not sold by 2min30s left, we will hard exit and execute stop loss
             # -----------------------------------------
             if should_hard_exit_market(IN_POSITION, seconds_left):
-                append_log([
-                    f"⏰ HARD EXIT TRIGGERED. {seconds_left:.0f}s left. Closing to avoid liquidity trap and last minute swings."
-                ])
-                print(f"⏰ HARD EXIT TRIGGERED. {seconds_left:.0f}s left. Closing to avoid liquidity trap and last minute swings.")
+                msg = f"⏰ HARD EXIT TRIGGERED @ {seconds_left:.1f}s left."
+                print(msg)
                 exit_id = up_id if LEG_1_BID_DIRECTION == "UP" else down_id
                 try:
                     hard_exit_response = execute_stop_loss(exit_id, LEG_1_SHARES, EFFECTIVE_STOP_LOSS, "SELL", MAX_SLIPPAGE)
                     if hard_exit_response and hard_exit_response.get("success"):
                         IN_POSITION = False
                         SHOULD_BID = False
-                        append_log([f"🟢 HARD TIME EXIT SUCCESSFUL @ {seconds_left:.0f}s left."])
+                        append_log([f"✅ HARD EXIT SUCCESSFUL. Sold {LEG_1_SHARES} shares."])
                         print(f"🟢 HARD TIME EXIT SUCCESSFUL @ {seconds_left:.0f}s left.")
-                        break
+                        return
                     else:
-                        print(f"❌ Hard Exit not successful! Execute stop loss response: {hard_exit_response}")
+                        msg_exit_failed = f"❌ Hard Exit not successful! Execute stop loss response: {hard_exit_response}"
+                        print(msg_exit_failed)
+                        append_log([msg_exit_failed])
                 except Exception as e:
                     append_log([
                         f"❌ Hard Exit Error: {e}"
@@ -220,30 +226,31 @@ def run_bot(event_url):
 
                 # 5.2 Check if price has dropped to our floor
                 if current_price <= EFFECTIVE_STOP_LOSS:
-                    print(f"🚨 STOP LOSS TRIGGERED! Price {current_price} <= {EFFECTIVE_STOP_LOSS}")
-                    append_log([
-                        f"🚨 STOP LOSS TRIGGERED! Price {current_price} <= {EFFECTIVE_STOP_LOSS}",
-                    ])
+                    msg = f"🚨 STOP LOSS HIT: Price {current_price} <= {effective_stop_loss}"
+                    print(msg)
+                    append_log([msg])
                     # 5.3 Liquidate: Sell the directional leg 1 position
                     exit_id = up_id if LEG_1_BID_DIRECTION == "UP" else down_id
                     try:
                         print(f"🔥 Panic Selling {LEG_1_BID_DIRECTION} to preserve capital...")
                         sell_resp = execute_stop_loss(exit_id, LEG_1_SHARES, EFFECTIVE_STOP_LOSS, "SELL", MAX_SLIPPAGE)
                         if sell_resp and sell_resp.get("success"):
-                            append_log([f"🔴 STOP LOSS EXECUTED @ {current_price} in {market_name}"])
-                            print(f"🟢 LIQUIDATION SUCCESSFUL. Resetting bot for next event.")
-
+                            msg_liquidation = f"🔴 LIQUIDATION COMPLETE @ {current_price}"
+                            print(msg_liquidation)
+                            append_log([msg_liquidation])
                             IN_POSITION = False
                             SHOULD_BID = False
                             LEG_1_BID_DIRECTION = None
-                            break
+                            return
                     except Exception as e:
-                        print(f"❌ CRITICAL: Stop loss execution failed! Manual intervention may be needed: {e}")
+                        msg_exception = f"❌ CRITICAL: Stop loss execution failed! Manual intervention may be needed: {e}"
+                        append_log([msg_exception])
+                        print(msg_exception)
 
             # -----------------------------------------
             # 6. TAKE PROFIT LOGIC
             # -----------------------------------------
-            if IN_POSITION:
+            if IN_POSITION and TAKE_PROFIT_ENABLED:
                 # Check price of our current holding
                 current_price = bid_up if LEG_1_BID_DIRECTION == "UP" else bid_down
                 
@@ -251,14 +258,21 @@ def run_bot(event_url):
                 tp_price = round(LEG_1_BID_PRICE * (1 + TAKE_PROFIT_RATIO), 2)
 
                 if current_price >= tp_price:
-                    print(f"💰 TAKE PROFIT TRIGGERED! Price {current_price} >= {tp_price}")
-                    append_log([f"💰 TAKE PROFIT EXECUTED @ {current_price} (+{TAKE_PROFIT_RATIO*100}%)"])
+                    msg = f"💰 TAKE PROFIT HIT: Price {current_price} >= {tp_price}"
+                    print(msg)
+                    append_log([
+                        msg,
+                        f"💰 Take Profit Attempt Executed @ {current_price} (+{TAKE_PROFIT_RATIO * 100}%)"
+                    ])
 
                     exit_id = up_id if LEG_1_BID_DIRECTION == "UP" else down_id
                     # liquidate position to take profits
                     try:
-                        tp_response = execute_stop_loss(exit_id, LEG_1_SHARES, 0.01, "SELL", MAX_SLIPPAGE)
+                        tp_response = execute_take_profit(exit_id, LEG_1_SHARES, tp_price, "SELL")
                         if tp_response and tp_response.get("success"):
+                            msg_profit = f"🟢💰 Take Profit SUCCESSFUL! Executed @ {current_price} (+{TAKE_PROFIT_RATIO * 100}%) Resetting bot for next event."
+                            append_log([msg_profit])
+                            print(msg_profit)
                             IN_POSITION = False
                             SHOULD_BID = False
                             break
@@ -279,8 +293,10 @@ def run_bot(event_url):
                 # - Price is less than MAX_LEG_1_COST_PRICE
                 # - Price is on a trending momentum by being higher than the last 10 prices
                 # - Price is the lesser amount between up and down
-                up_eligible = bid_up >= MIN_LEG_1_COST_PRICE and bid_up <= MAX_LEG_1_COST_PRICE and bid_up >= up_mean_price and bid_up <= bid_down
-                down_eligible = bid_down >= MIN_LEG_1_COST_PRICE and bid_down <= MAX_LEG_1_COST_PRICE and bid_down >= down_mean_price and bid_down < bid_up
+                # up_eligible = bid_up >= MIN_LEG_1_COST_PRICE and bid_up <= MAX_LEG_1_COST_PRICE and bid_up >= up_mean_price and bid_up <= bid_down
+                # down_eligible = bid_down >= MIN_LEG_1_COST_PRICE and bid_down <= MAX_LEG_1_COST_PRICE and bid_down >= down_mean_price and bid_down < bid_up
+                up_eligible = bid_up >= MIN_LEG_1_COST_PRICE and bid_up <= MAX_LEG_1_COST_PRICE and bid_up >= up_mean_price
+                down_eligible = bid_down >= MIN_LEG_1_COST_PRICE and bid_down <= MAX_LEG_1_COST_PRICE and bid_down >= down_mean_price
 
                 # decision matrix to buy UP/DOWN
                 if up_eligible and down_eligible:
@@ -313,9 +329,18 @@ def run_bot(event_url):
                         SHOULD_BID = False
                         LEG_1_BID_DIRECTION, LEG_1_BID_PRICE, LEG_1_SHARES = target_side, target_price, round(leg_1_shares, 2)
                         EFFECTIVE_STOP_LOSS = round(LEG_1_BID_PRICE * CAPITAL_PRESERVATION_RATIO, 2)
-                        append_log([
-                            f"✅ BUY UP @ {round(LEG_1_BID_PRICE, 2)} on shares: {round(LEG_1_SHARES, 2)}. total size: {LEG_1_SHARES * LEG_1_BID_PRICE}"
-                        ])
+                        entry_log = [
+                            f"✅ POSITION ENTERED",
+                            f"   - Side: {LEG_1_BID_DIRECTION}",
+                            f"   - Avg Price: {LEG_1_BID_PRICE}",
+                            f"   - Shares: {LEG_1_SHARES}",
+                            f"   - Total Cost: ${round(LEG_1_SHARES * LEG_1_BID_PRICE, 2)}",
+                            f"   - UP mean price: {up_mean_price}",
+                            f".  - Last 10 UP bids: {last_ten_up_bids}"
+                            f"   - DOWN mean price: {down_mean_price}",
+                            f".  - Last 10 DOWN bids: {last_ten_down_bids}"
+                        ]
+                        append_log(entry_log)
                         print(f"✅📈 You have successfully placed a buy {LEG_1_BID_DIRECTION}. Good Luck!")
                         print(f"🟢 Purchase complete! Purchase Details:")
                         print(f"🟢 target_id: {target_id}")
@@ -324,12 +349,15 @@ def run_bot(event_url):
                         print(f"🟢 Leg 1 shares count: {LEG_1_SHARES}")
                     else:
                         print(f"Buy {target_side} not successful!")
+                        append_log([f"Buy {target_side} not successful at price: {LEG_1_BID_PRICE}"])
                 except Exception as e:
-                    append_log([
-                        f"💀 Leg 1 BUY {target_side} Failed. {target_side} price: {target_price} | Error: {e}"
-                    ])
-                    print(f"💀 Leg 1 BUY {target_side} Failed. {target_side} price: {target_price} | Error: {e}")
-                time.sleep(0.2)
+                    msg_exception = f"💀 Leg 1 BUY {target_side} Failed. {target_side} price: {target_price} | Error: {e}"
+                    append_log([msg_exception])
+                    print(msg_exception)
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        print("\n🛑 Program interrupted by user. Exiting...")
+        return
     except Exception as e:
         append_log([
             f"Error occurred running event {market_name}. Error: {e}"
@@ -411,6 +439,57 @@ def execute_market_buy(token_id, target_price, order_type, side="BUY", max_slipp
         token_id = token_id
     ))
     return client.post_order(order, order_type), shares
+
+def execute_take_profit(token_id, shares, take_profit_price, side = "SELL"):
+    response = None
+    while True:
+        # 1. Fetch live on-chain balance
+        balance_info = client.get_balance_allowance(
+            BalanceAllowanceParams(
+                asset_type=AssetType.CONDITIONAL,
+                token_id=token_id
+            )
+        )
+        balance = float(balance_info.get("balance", 0)) / 1e6
+
+        if balance < 0.01:
+            print(f"✅ Liquidation complete. Final Balance: {balance}")
+            return response
+
+        # 1. Quick refresh: Get the very latest price
+        current_bid = get_live_bid(token_id)
+        if not current_bid:
+            print("⚠️ No liquidity found. Waiting to retry...")
+            continue
+        print(f"📘 Take profit price: {current_bid}, Effective Take profit price: {take_profit_price}")
+        if current_bid > take_profit_price:
+            print(f"🚀💥 Aborting Take profit Execution. Current price: {current_bid} has recovered from Take profit price: {take_profit_price}")
+            break
+        # Market SELL: amount = number of shares. 
+        # API Rule: Sell orders must have max 2 decimal places for the share amount.
+        sell_qty = math.floor(balance * 100) / 100.0
+        print(f"-------------------Attempting STOP LOSS SELL -----------------------")
+        print(f"Sell Type: Fill-and-Kill")
+        print(f"Wallet Balance: {balance}")
+        print(f"Targeting Bid: {current_bid} | Selling Qty: {sell_qty}")
+        print(f"-------------------Attempting STOP LOSS SELL -----------------------")
+
+        # 3. execute the take profit
+        try:
+            order = client.create_market_order(MarketOrderArgs(
+                amount = round(sell_qty, 2), # number of shares to sell
+                side = side,
+                token_id = token_id
+            ))
+            response = client.post_order(order, OrderType.FAK)
+            if response and response.get("success"):
+                print(f"🟢 Successfully processed partial/full fill.")
+            else:
+                print(f"❌ Take profit SELL rejected or expired. Retrying...")
+        except Exception as e:
+            print(f"❌ Take profit execution Error: {e}. Retrying...")
+        time.sleep(0.2)
+    return response
 
 def execute_stop_loss(token_id, shares, stop_loss_price, side="SELL", max_slippage = 0.02):
     # 1. Repeatedly submits FAK(Fill-and-Kill) orders until the conditional token balance for the specific market is 0
